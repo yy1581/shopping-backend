@@ -229,7 +229,13 @@ app.get(
 app.get(
   "/products",
   asyncHandler(async (req, res) => {
-    const { offset = 0, limit = 10, order = "newest", category } = req.query;
+    const {
+      offset = 0,
+      limit = 10,
+      order = "newest",
+      category,
+      search,
+    } = req.query;
     let orderBy;
     switch (order) {
       case "priceLowest":
@@ -245,7 +251,17 @@ app.get(
       default:
         orderBy = { createdAt: "desc" };
     }
-    const where = category ? { category } : {};
+    const where = {
+      ...(category ? { category } : {}),
+      ...(search
+        ? {
+            name: {
+              contains: search,
+              mode: "insensitive", // 대소문자 구분 없이 검색
+            },
+          }
+        : {}),
+    };
     const products = await prisma.product.findMany({
       where,
       orderBy,
