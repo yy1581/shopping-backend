@@ -1,15 +1,16 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from "@prisma/client";
 import {
   USERS,
   USER_PREFERENCES,
   PRODUCTS,
   ORDERS,
   ORDER_ITEMS,
-} from './mock.js';
+} from "./mock.js";
 
 const prisma = new PrismaClient();
 
 async function main() {
+  await prisma.$queryRaw`TRUNCATE TABLE "public"."_ProductToUser" RESTART IDENTITY CASCADE;`;
   // 기존 데이터 삭제
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
@@ -23,22 +24,32 @@ async function main() {
     skipDuplicates: true,
   });
 
-  await Promise.all(
-    USERS.map(async (user) => {
-      await prisma.user.create({ data: user });
-    })
-  );
+  // `savedProducts` 필드를 제외하고 사용자 생성
+  for (const user of USERS) {
+    const { savedProducts, ...userData } = user; // eslint-disable-line no-unused-vars
+    await prisma.user.create({ data: userData });
+  }
+
+  // `savedProducts` 관계 설정
+  for (const user of USERS) {
+    if (user.savedProducts) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { savedProducts: user.savedProducts },
+      });
+    }
+  }
 
   await prisma.userPreference.createMany({
     data: USER_PREFERENCES,
     skipDuplicates: true,
   });
-  
+
   await prisma.order.createMany({
     data: ORDERS,
     skipDuplicates: true,
   });
-  
+
   await prisma.orderItem.createMany({
     data: ORDER_ITEMS,
     skipDuplicates: true,

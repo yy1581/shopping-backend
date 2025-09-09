@@ -19,6 +19,7 @@ const Uuid = s.define("Uuid", (value) => isUuid.v4(value));
 export const CreateUser = s.object({
   email: s.define("Email", isEmail),
   firstName: s.size(s.string(), 1, 30),
+  password: s.size(s.string(), 8, 30),
   lastName: s.size(s.string(), 1, 30),
   address: s.string(),
   userPreference: s.object({
@@ -27,6 +28,15 @@ export const CreateUser = s.object({
 });
 
 export const PatchUser = s.partial(CreateUser);
+
+export const CreateUserPreference = s.object({
+  receiveEmail: s.boolean(),
+});
+
+export const Login = s.object({
+  email: s.define("Email", isEmail),
+  password: s.string(),
+});
 
 export const CreateProduct = s.object({
   name: s.size(s.string(), 1, 60),

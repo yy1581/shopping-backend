@@ -1,12 +1,15 @@
 import cors from "cors";
 import * as dotenv from "dotenv";
 dotenv.config();
+import bcrypt from "bcrypt";
+import cookieParser from "cookie-parser";
 import express from "express";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { assert } from "superstruct";
 import {
   CreateUser,
   PatchUser,
+  Login,
   CreateProduct,
   PatchProduct,
   CreateOrder,
@@ -19,11 +22,12 @@ const prisma = new PrismaClient();
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
 
 function asyncHandler(handler) {
-  return async function (req, res) {
+  return async function (req, res, next) {
     try {
-      await handler(req, res);
+      await handler(req, res, next);
     } catch (e) {
       if (
         e.name === "StructError" ||
@@ -35,12 +39,105 @@ function asyncHandler(handler) {
         e.code === "P2025"
       ) {
         res.sendStatus(404);
+      } else if (e.name === "AuthError") {
+        res.status(401).send({ message: e.message || "Authentication failed" });
       } else {
-        res.status(500).send({ message: e.message });
+        // 예상치 못한 에러는 next를 통해 Express의 기본 에러 핸들러로 전달합니다.
+        next(e);
       }
     }
   };
 }
+
+class AuthError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
+const auth = asyncHandler(async (req, res, next) => {
+  const token = req.cookies.token;
+  if (!token) {
+    throw new AuthError("No token provided");
+  }
+
+  const decoded = Buffer.from(token, "base64").toString("ascii");
+  const [userId, password] = decoded.split(":");
+
+  if (!userId || !password) {
+    throw new AuthError("Invalid token format");
+  }
+
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    include: {
+      userPreference: true,
+    },
+  });
+
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+
+  if (!isPasswordValid) {
+    throw new AuthError("Invalid credentials in token");
+  }
+
+  req.user = user;
+  next();
+});
+
+/*********** auth ***********/
+
+app.post(
+  "/auth/login",
+  asyncHandler(async (req, res) => {
+    assert(req.body, Login);
+    const { email, password } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new AuthError("Invalid credentials");
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      throw new AuthError("Invalid credentials");
+    }
+
+    const token = Buffer.from(`${user.id}:${password}`).toString("base64");
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      // 1일 후 만료 (24시간 * 60분 * 60초 * 1000밀리초)
+      maxAge: 24 * 60 * 60 * 1000,
+      secure: process.env.NODE_ENV === "production", // HTTPS에서만 쿠키 전송
+    });
+
+    res.status(200).send({ message: "Logged in successfully" });
+  })
+);
+
+app.post(
+  "/auth/logout",
+  asyncHandler(async (req, res) => {
+    res.clearCookie("token");
+    res.status(200).send({ message: "Logged out successfully" });
+  })
+);
+
+app.get(
+  "/users/me",
+  auth,
+  asyncHandler(async (req, res) => {
+    // auth 미들웨어에서 req.user에 저장한 사용자 정보를 반환합니다.
+    res.send(req.user);
+  })
+);
 
 /*********** users ***********/
 
@@ -92,6 +189,8 @@ app.post(
   asyncHandler(async (req, res) => {
     assert(req.body, CreateUser);
     const { userPreference, ...userFields } = req.body;
+    const hashedPassword = await bcrypt.hash(userFields.password, 10);
+    userFields.password = hashedPassword;
     const user = await prisma.user.create({
       data: {
         ...userFields,
@@ -113,6 +212,10 @@ app.patch(
     assert(req.body, PatchUser);
     const { id } = req.params;
     const { userPreference, ...userFields } = req.body;
+    if (userFields.password) {
+      const hashedPassword = await bcrypt.hash(userFields.password, 10);
+      userFields.password = hashedPassword;
+    }
     const user = await prisma.user.update({
       where: { id },
       data: {
@@ -141,10 +244,12 @@ app.delete(
 );
 
 // 다대다 관계 user의 savedProducts 조회
+// 인증된 사용자 본인의 savedProducts만 조회 가능
 app.get(
-  "/users/:id/saved-products",
+  "/users/me/saved-products",
+  auth,
   asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { id } = req.user;
     const { savedProducts } = await prisma.user.findUniqueOrThrow({
       where: { id },
       include: {
@@ -156,11 +261,13 @@ app.get(
 );
 
 // 다대다 관계 user의 savedProducts 생성/제거
+// 인증된 사용자 본인의 savedProducts만 조작 가능
 app.post(
-  "/users/:id/saved-products",
+  "/users/me/saved-products",
+  auth,
   asyncHandler(async (req, res) => {
     assert(req.body, PostSavedProduct);
-    const { id: userId } = req.params;
+    const userId = req.user.id;
     const { productId } = req.body;
     const isProductSaved =
       (await prisma.user.count({
