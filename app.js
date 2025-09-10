@@ -20,12 +20,7 @@ import {
 const prisma = new PrismaClient();
 
 const app = express();
-app.use(
-  cors({
-    origin: true, // 요청 출처를 그대로 허용
-    credentials: true, // 쿠키 및 인증 헤더 허용
-  })
-);
+app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
 
