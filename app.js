@@ -187,7 +187,6 @@ app.get(
 app.post(
   "/users",
   asyncHandler(async (req, res) => {
-    console.log("Received request body:", req.body); // 이 줄을 추가하세요
     assert(req.body, CreateUser);
     const { userPreference, ...userFields } = req.body;
     const hashedPassword = await bcrypt.hash(userFields.password, 10);
