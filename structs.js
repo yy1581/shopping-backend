@@ -17,10 +17,10 @@ const STATUSES = ["PENDING", "COMPLETE"];
 const Uuid = s.define("Uuid", (value) => isUuid.v4(value));
 
 export const CreateUser = s.object({
-  email: s.define("Email", isEmail),
   firstName: s.size(s.string(), 1, 30),
   password: s.size(s.string(), 8, 30),
   lastName: s.size(s.string(), 1, 30),
+  email: s.define("Email", isEmail),
   address: s.string(),
   userPreference: s.object({
     receiveEmail: s.boolean(),
